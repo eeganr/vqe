@@ -1,4 +1,5 @@
 import numpy as np
+from copy import deepcopy
 def apply_many_body_gate(psi_in, gate, nb_qbits, sites):
     """
     psi_in: input wave function of shape (d,d,d,d,d...)
@@ -24,7 +25,36 @@ def apply_many_body_gate(psi_in, gate, nb_qbits, sites):
         psi_out = psi_out.swapaxes(site, -1).squeeze(-1)
     return psi_out# .contiguous()
 
-G = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"]
-E = [("1", "2"), ("2", "3"), ("3", "4"), ("4", "5"), ("5", "6"), ("6", "7"), 
-     ("8", "9"), ("9", "10"), ("10", "11"), ("11", "12"), ("12", "13"), ("13", "14"),
-     ("1", "8"), ("2", "9"), ("3", "10"), ("4", "11"), ("5", "12"), ("6", "13"), ("7", "14")]
+psi = np.ones((2, 2, 2, 2))
+
+psi = psi / np.linalg.norm(psi.ravel())
+
+
+gate = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, -1]])
+gate = gate.reshape(2, 2, 2, 2)
+
+psiprime = apply_many_body_gate(psi, gate, 4, [0, 2])
+
+print(psiprime)
+
+psi0 = psiprime[:, 0, :, :]
+
+psi1 = psiprime[:, 1, :, :]
+
+p0 = np.linalg.norm(psi0)
+
+p1 = np.linalg.norm(psi1)
+
+psi0 /= p0
+psi1 /= p1
+
+p0 = p0 ** 2
+p1 = p1 ** 2
+
+print(p0, p1, psi0, psi1)
+
+# Put in another qubit
+
+psi0 = np.tensordot(psi0, np.array([1, 0]), 0)
+
+print(psi0)
