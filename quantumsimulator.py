@@ -35,7 +35,7 @@ class QuantumSimulator:
         return psi_out# .contiguous()
 
     @staticmethod
-    def measure_remove_single_site(psi_in,  site, basis=None, check_valid=False, eps=1e-14):
+    def measure_remove_single_site(psi_in, site, basis=None, check_valid=False, eps=1e-14):
         """
         psi_in: ibkndut wave function of shape (d,d,d,d,d...)
         site: the site to measure
@@ -110,3 +110,15 @@ class QuantumSimulator:
         psi = psi / bknd.linalg.norm(psi.ravel())
 
         return psi
+    
+
+# Neural network will create a bunch of gates
+# Different probability for each gate
+# Use some search algorithm for gate creation?
+# Reward = energy of the system (some relation)
+# |psi> ---circ---> |psi'>
+# tune theta parameters to maximize reward
+
+# Simulated annealing for thetas? - no feedback?
+# Use MCTS? 
+# Train policy network independently
