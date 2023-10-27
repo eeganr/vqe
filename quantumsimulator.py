@@ -1,6 +1,7 @@
 import torch
 from copy import deepcopy
 
+
 backend = 'torch'
 
 if backend == 'torch':
@@ -40,7 +41,7 @@ Sx = S_x = sigma_x / 2
 Sy = S_y = sigma_y / 2
 Sz = S_z = sigma_z / 2
 
-CX = bknd.array([[1., 0., 0., 0.], # TODO: Check is this is correct
+CX = bknd_tensor([[1., 0., 0., 0.], # TODO: Check is this is correct
                   [0., 1., 0., 0.], 
                   [0., 0., 0., 1.], 
                   [0., 0., 1., 0.]])
@@ -61,6 +62,9 @@ def apply_many_body_gate(psi_in, gate, nb_qbits, sites):
         if site < 0:
             site = nb_qbits + site
         psi_out = psi_out.reshape(*psi_out.shape, 1).swapaxes(site, -1)
+    print(psi_out, gate, (list(range(-num_sites, 0)), 
+                                            list(range(-num_sites, 0))))
+    print('############')
     psi_out = bknd.tensordot(psi_out, gate, (list(range(-num_sites, 0)), 
                                             list(range(-num_sites, 0))))
     # move the contracted dimensions back
@@ -212,23 +216,43 @@ def gen_tfim_ham(h, nb_qbits, periodic=False, device=None):
     return ham
 
 
+def expect_value(operator, psi, normalize=False):
+    """
+    computes the expectation value of <psi|H|psi>
+    operator: an operator can be either a matrix or a function that computes Opsi
+    psi: needs to have shape compatible with operator
+    normalize: whether to explicitly normalize
+    return <psi|O|psi> if not normalize else <psi|O|psi>/<psi|psi>
+    """
+    if callable(operator):
+        Opsi = operator(psi).ravel()
+        psi = psi.ravel()
+        ev = bknd.vdot(psi @ Opsi)
+    else:
+        psi = psi.ravel()
+        ev = psi.conj() @ operator @ psi
+    if normalize:
+        normsq = bknd.vdot(psi, psi)
+        ev /= normsq
+    return ev
+
 def Rx_gate(theta):
-    return bknd.array([[bknd.cos(theta/2), -1j*bknd.sin(theta/2)], [-1j*bknd.sin(theta/2), bknd.cos(theta/2)]])
+    return bknd_tensor([[bknd.cos(theta/2), -1j*bknd.sin(theta/2)], [-1j*bknd.sin(theta/2), bknd.cos(theta/2)]])
 
 
 def Ry_gate(theta):
-    return bknd.array([[bknd.cos(theta/2), -bknd.sin(theta/2)], [bknd.sin(theta/2), bknd.cos(theta/2)]])
+    return bknd_tensor([[bknd.cos(theta/2), -bknd.sin(theta/2)], [bknd.sin(theta/2), bknd.cos(theta/2)]])
 
 
 def Rz_gate(theta):
-    return bknd.array([[bknd.exp(-1j*theta/2), 0], [0, bknd.exp(1j*theta/2)]])
+    return bknd_tensor([[bknd.exp(-1j*theta/2), 0], [0, bknd.exp(1j*theta/2)]])
 
 
 def su2_transform_psi(psi0, thetas):
     qubits = thetas.shape[0]
     gates = thetas.shape[1]
 
-    psi_out = psi0.copy()
+    psi_out = psi0.detach().clone().to(bknd.complex64)
 
     # Check if psi0 fits number of qubits
     assert qubits == len(psi0.shape)
@@ -238,16 +262,21 @@ def su2_transform_psi(psi0, thetas):
         for row in range(qubits):
             if col % 2 == 0:
                 gate = Ry_gate(thetas[row][col])
-                psi_out = apply_many_body_gate(psi_out, gate, qubits, [row])
+                psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
             else: 
                 gate = Rz_gate(thetas[row][col])
-                psi_out = apply_many_body_gate(psi_out, gate, qubits, [row])
-                if col < gates - 1 and row < qubits - 1:
-                    psi_out = apply_many_body_gate(psi_out, CX, qubits, [row, row+1])
+                psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
+                if col < gates - 1 and row == qubits - 1:
+                    for row_CX in reversed(range(qubits - 1)):
+                        psi_out = apply_many_body_gate(psi_out, CX.to(bknd.complex64), qubits, [row_CX, row_CX+1])
+                        # TODO: Problem here? Changes shape of psi?
     
     return psi_out
     
-
+def su2_energy_from_thetas(psi0, thetas):
+    psi_out = su2_transform_psi(psi0, thetas)
+    ham = gen_tfim_ham(0, thetas.shape[0])
+    return expect_value(ham, psi_out, True)
 # Neural network will create a bunch of gates
 # Different probability for each gate
 # Use some search algorithm for gate creation?

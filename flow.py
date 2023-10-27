@@ -1,4 +1,4 @@
-from quantumsimulator import QuantumSimulator as qs
+from quantumsimulator import *
 import torch as bknd
 
 # Standard libraries
@@ -37,18 +37,15 @@ print("Using device", device)
 
 qubits = 3
 
-psi = qs.normalize(bknd.rand((2,)*qubits))
+psi = normalize(bknd.rand((2,)*qubits))
 
-ham = qs.gen_tfim_ham(1, qubits)
+ham = gen_tfim_ham(1, qubits)
 
 thetas = bknd.rand((2,)*qubits)
 
 orig_img = thetas
 
-# Path to the folder where the datasets are/should be downloaded (e.g. MNIST)
-DATASET_PATH = "../data"
-# Path to the folder where the pretrained models are saved
-CHECKPOINT_PATH = "../saved_models/vqe"
+CHECKPOINT_PATH = "../saved_models/flowmodel"
 
 # Setting the seed
 pl.seed_everything(42)
@@ -60,9 +57,6 @@ torch.backends.cudnn.benchmark = False
 # Fetching the device that will be used throughout this notebook
 device = torch.device("cpu") if not torch.cuda.is_available() else torch.device("cuda:0")
 print("Using device", device)
-
-# Create checkpoint path if it doesn't exist yet
-os.makedirs(CHECKPOINT_PATH, exist_ok=True)
 
 # Transformations applied on each image => make them a tensor and discretize
 transform = transforms.Compose([transforms.ToTensor(),])
@@ -96,17 +90,11 @@ class ImageFlow(pl.LightningModule):
 
     def _get_likelihood(self, imgs, return_ll=False):
         """
-        Given a batch of images, return the likelihood of those.
-        If return_ll is True, this function returns the log likelihood of the input.
-        Otherwise, the ouptut metric is bits per dimension (scaled negative log likelihood)
+        New loss function? TODO: Check if reasonable
         """
-        z, ldj = self.encode(imgs)
-        log_pz = self.prior.log_prob(z).sum(dim=[1, 2, 3])
-        log_px = ldj + log_pz
-        nll = -log_px
-        # Calculating bits per dimension
-        bpd = nll * np.log2(np.exp(1)) / np.prod(imgs.shape[1:])
-        return bpd.mean() if not return_ll else log_px
+        energies = [su2_energy_from_thetas(psi, img) for img in imgs]
+
+        return -torch.stack(energies).mean()+min(energies)
 
     @torch.no_grad()
     def sample(self, img_shape, z_init=None):
@@ -159,144 +147,6 @@ class ImageFlow(pl.LightningModule):
 
         self.log('test_bpd', bpd)
 
-class Dequantization(nn.Module):
-
-    def __init__(self, alpha=1e-5, quants=256):
-        """
-        Inputs:
-            alpha - small constant that is used to scale the original input.
-                    Prevents dealing with values very close to 0 and 1 when inverting the sigmoid
-            quants - Number of possible discrete values (usually 256 for 8-bit image)
-        """
-        super().__init__()
-        self.alpha = alpha
-        self.quants = quants
-
-    def forward(self, z, ldj, reverse=False):
-        if not reverse:
-            z, ldj = self.dequant(z, ldj)
-            z, ldj = self.sigmoid(z, ldj, reverse=True)
-        else:
-            z, ldj = self.sigmoid(z, ldj, reverse=False)
-            z = z * self.quants
-            ldj += np.log(self.quants) * np.prod(z.shape[1:])
-            z = torch.floor(z).clamp(min=0, max=self.quants - 1).to(torch.int32)
-        return z, ldj
-
-    def sigmoid(self, z, ldj, reverse=False):
-        # Applies an invertible sigmoid transformation
-        if not reverse:
-            ldj += (- z - 2 * F.softplus(-z)).sum(dim=[1, 2, 3])
-            z = torch.sigmoid(z)
-            # Reversing scaling for numerical stability
-            ldj -= np.log(1 - self.alpha) * np.prod(z.shape[1:])
-            z = (z - 0.5 * self.alpha) / (1 - self.alpha)
-        else:
-            z = z * (1 - self.alpha) + 0.5 * self.alpha  # Scale to prevent boundaries 0 and 1
-            ldj += np.log(1 - self.alpha) * np.prod(z.shape[1:])
-            ldj += (-torch.log(z) - torch.log(1 - z)).sum(dim=[1, 2, 3])
-            z = torch.log(z) - torch.log(1 - z)
-        return z, ldj
-
-    def dequant(self, z, ldj):
-        # Transform discrete values to continuous volumes
-        z = z.to(torch.float32)
-        z = z + torch.rand_like(z).detach()
-        z = z / self.quants
-        ldj -= np.log(self.quants) * np.prod(z.shape[1:])
-        return z, ldj
-    
-
-## Testing invertibility of dequantization layer
-pl.seed_everything(42)
-ldj = torch.zeros(1,)
-dequant_module = Dequantization()
-deq_img, ldj = dequant_module(orig_img, ldj, reverse=False)
-reconst_img, ldj = dequant_module(deq_img, ldj, reverse=True)
-
-d1, d2 = torch.where(orig_img.squeeze() != reconst_img.squeeze())
-if len(d1) != 0:
-    print("Dequantization was not invertible.")
-    for i in range(d1.shape[0]):
-        print("Original value:", orig_img[0, 0, d1[i], d2[i]].item())
-        print("Reconstructed value:", reconst_img[0, 0, d1[i], d2[i]].item())
-else:
-    print("Successfully inverted dequantization")
-
-# Layer is not strictly invertible due to float precision constraints
-# assert (orig_img == reconst_img).all().item()
-
-def visualize_dequantization(quants, prior=None):
-    """
-    Function for visualizing the dequantization values of discrete values in continuous space
-    """
-    # Prior over discrete values. If not given, a uniform is assumed
-    if prior is None:
-        prior = np.ones(quants, dtype=np.float32) / quants
-    prior = prior / prior.sum()  # Ensure proper categorical distribution
-
-    inp = torch.arange(-4, 4, 0.01).view(-1, 1, 1, 1) # Possible continuous values we want to consider
-    ldj = torch.zeros(inp.shape[0])
-    dequant_module = Dequantization(quants=quants)
-    # Invert dequantization on continuous values to find corresponding discrete value
-    out, ldj = dequant_module.forward(inp, ldj, reverse=True)
-    inp, out, prob = inp.squeeze().numpy(), out.squeeze().numpy(), ldj.exp().numpy()
-    prob = prob * prior[out] # Probability scaled by categorical prior
-
-    # Plot volumes and continuous distribution
-    sns.set_style("white")
-    fig = plt.figure(figsize=(6, 3))
-    x_ticks = []
-    for v in np.unique(out):
-        indices = np.where(out == v)
-        color = to_rgb(f"C{v}")
-        plt.fill_between(inp[indices], prob[indices], np.zeros(indices[0].shape[0]), color=color + (0.5,), label=str(v))
-        plt.plot([inp[indices[0][0]]] * 2, [0, prob[indices[0][0]]], color=color)
-        plt.plot([inp[indices[0][-1]]] * 2, [0, prob[indices[0][-1]]], color=color)
-        x_ticks.append(inp[indices[0][0]])
-    x_ticks.append(inp.max())
-    plt.xticks(x_ticks, [f"{x:.1f}" for x in x_ticks])
-    plt.plot(inp, prob, color=(0.0, 0.0, 0.0))
-    # Set final plot properties
-    plt.ylim(0, prob.max() * 1.1)
-    plt.xlim(inp.min(), inp.max())
-    plt.xlabel("z")
-    plt.ylabel("Probability")
-    plt.title(f"Dequantization distribution for {quants} discrete values")
-    plt.legend()
-    plt.show()
-    plt.close()
-
-visualize_dequantization(quants=8)
-
-class VariationalDequantization(Dequantization):
-
-    def __init__(self, var_flows, alpha=1e-5):
-        """
-        Inputs:
-            var_flows - A list of flow transformations to use for modeling q(u|x)
-            alpha - Small constant, see Dequantization for details
-        """
-        super().__init__(alpha=alpha)
-        self.flows = nn.ModuleList(var_flows)
-
-    def dequant(self, z, ldj):
-        z = z.to(torch.float32)
-        img = (z / 255.0) * 2 - 1 # We condition the flows on x, i.e. the original image
-
-        # Prior of u is a uniform distribution as before
-        # As most flow transformations are defined on [-infinity,+infinity], we apply an inverse sigmoid first.
-        deq_noise = torch.rand_like(z).detach()
-        deq_noise, ldj = self.sigmoid(deq_noise, ldj, reverse=True)
-        for flow in self.flows:
-            deq_noise, ldj = flow(deq_noise, ldj, reverse=False, orig_img=img)
-        deq_noise, ldj = self.sigmoid(deq_noise, ldj, reverse=False)
-
-        # After the flows, apply u as in standard dequantization
-        z = (z + deq_noise) / 256.0
-        ldj -= np.log(256.0) * np.prod(z.shape[1:])
-        return z, ldj
-    
 
 class CouplingLayer(nn.Module):
 
@@ -386,7 +236,7 @@ def create_channel_mask(c_in, invert=False):
         mask = 1 - mask
     return mask
 
-checkerboard_mask = create_checkerboard_mask(h=8, w=8).expand(-1, 2, -1, -1)
+checkerboard_mask = create_checkerboard_mask(h=thetas.shape[0], w=thetas.shape[1]).expand(-1, 2, -1, -1)
 channel_mask = create_channel_mask(c_in=2).expand(-1, -1, 8, 8)
 
 class ConcatELU(nn.Module):
@@ -471,19 +321,12 @@ class GatedConvNet(nn.Module):
     def forward(self, x):
         return self.nn(x)
     
-def create_simple_flow(use_vardeq=True):
+def create_simple_flow():
     flow_layers = []
-    if use_vardeq:
-        vardeq_layers = [CouplingLayer(network=GatedConvNet(c_in=2, c_out=2, c_hidden=16),
-                                       mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
-                                       c_in=1) for i in range(4)]
-        flow_layers += [VariationalDequantization(var_flows=vardeq_layers)]
-    else:
-        flow_layers += [Dequantization()]
 
     for i in range(8):
         flow_layers += [CouplingLayer(network=GatedConvNet(c_in=1, c_hidden=32),
-                                      mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
+                                      mask=create_checkerboard_mask(h=thetas.shape[0], w=thetas.shape[1], invert=(i % 2 == 1)),
                                       c_in=1)]
 
     flow_model = ImageFlow(flow_layers).to(device)
@@ -568,7 +411,6 @@ def create_multiscale_flow():
     vardeq_layers = [CouplingLayer(network=GatedConvNet(c_in=2, c_out=2, c_hidden=16),
                                    mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
                                    c_in=1) for i in range(4)]
-    flow_layers += [VariationalDequantization(vardeq_layers)]
 
     flow_layers += [CouplingLayer(network=GatedConvNet(c_in=1, c_hidden=32),
                                   mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
@@ -623,15 +465,6 @@ def interpolate(model, img1, img2, num_steps=8):
     interpolations = z[0:1] * alpha + z[1:2] * (1 - alpha)
     interp_imgs = model.sample(interpolations.shape[:1] + imgs.shape[1:], z_init=interpolations)
 
-exmp_imgs, _ = next(iter(train_loader))
-
-pl.seed_everything(42)
-for i in range(2):
-    interpolate(flow_dict["vardeq"]["model"], exmp_imgs[2 * i], exmp_imgs[2 * i + 1])
-
-pl.seed_everything(42)
-for i in range(2):
-    interpolate(flow_dict["multiscale"]["model"], exmp_imgs[2 * i], exmp_imgs[2 * i + 1])
 
 pl.seed_everything(44)
 for _ in range(3):
