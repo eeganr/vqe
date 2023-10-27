@@ -70,8 +70,7 @@ def discretize(sample):
     return (sample * 255).to(torch.int32)
 
 # Transformations applied on each image => make them a tensor and discretize
-transform = transforms.Compose([transforms.ToTensor(),
-                                discretize])
+transform = transforms.Compose([transforms.ToTensor(),])
 
 # Loading the training dataset. We need to split it into a training and validation part
 train_dataset = MNIST(root=DATASET_PATH, train=True, transform=transform, download=True)
@@ -91,14 +90,14 @@ test_loader = data.DataLoader(test_set, batch_size=64, shuffle=False, drop_last=
 def show_imgs(imgs, title=None, row_size=4):
     # Form a grid of pictures (we use max. 8 columns)
     num_imgs = imgs.shape[0] if isinstance(imgs, torch.Tensor) else len(imgs)
-    is_int = imgs.dtype==torch.int32 if isinstance(imgs, torch.Tensor) else imgs[0].dtype==torch.int32
+    is_int = imgs.dtype == torch.int32 if isinstance(imgs, torch.Tensor) else imgs[0].dtype == torch.int32
     nrow = min(num_imgs, row_size)
-    ncol = int(math.ceil(num_imgs/nrow))
+    ncol = int(math.ceil(num_imgs / nrow))
     imgs = torchvision.utils.make_grid(imgs, nrow=nrow, pad_value=128 if is_int else 0.5)
     np_imgs = imgs.cpu().numpy()
     # Plot the grid
-    plt.figure(figsize=(1.5*nrow, 1.5*ncol))
-    plt.imshow(np.transpose(np_imgs, (1,2,0)), interpolation='nearest')
+    plt.figure(figsize=(1.5 * nrow, 1.5 * ncol))
+    plt.imshow(np.transpose(np_imgs, (1, 2, 0)), interpolation='nearest')
     plt.axis('off')
     if title is not None:
         plt.title(title)
@@ -141,7 +140,7 @@ class ImageFlow(pl.LightningModule):
         Otherwise, the ouptut metric is bits per dimension (scaled negative log likelihood)
         """
         z, ldj = self.encode(imgs)
-        log_pz = self.prior.log_prob(z).sum(dim=[1,2,3])
+        log_pz = self.prior.log_prob(z).sum(dim=[1, 2, 3])
         log_px = ldj + log_pz
         nll = -log_px
         # Calculating bits per dimension
@@ -220,13 +219,13 @@ class Dequantization(nn.Module):
             z, ldj = self.sigmoid(z, ldj, reverse=False)
             z = z * self.quants
             ldj += np.log(self.quants) * np.prod(z.shape[1:])
-            z = torch.floor(z).clamp(min=0, max=self.quants-1).to(torch.int32)
+            z = torch.floor(z).clamp(min=0, max=self.quants - 1).to(torch.int32)
         return z, ldj
 
     def sigmoid(self, z, ldj, reverse=False):
         # Applies an invertible sigmoid transformation
         if not reverse:
-            ldj += (-z-2*F.softplus(-z)).sum(dim=[1,2,3])
+            ldj += (- z - 2 * F.softplus(-z)).sum(dim=[1, 2, 3])
             z = torch.sigmoid(z)
             # Reversing scaling for numerical stability
             ldj -= np.log(1 - self.alpha) * np.prod(z.shape[1:])
@@ -234,8 +233,8 @@ class Dequantization(nn.Module):
         else:
             z = z * (1 - self.alpha) + 0.5 * self.alpha  # Scale to prevent boundaries 0 and 1
             ldj += np.log(1 - self.alpha) * np.prod(z.shape[1:])
-            ldj += (-torch.log(z) - torch.log(1-z)).sum(dim=[1,2,3])
-            z = torch.log(z) - torch.log(1-z)
+            ldj += (-torch.log(z) - torch.log(1 - z)).sum(dim=[1, 2, 3])
+            z = torch.log(z) - torch.log(1 - z)
         return z, ldj
 
     def dequant(self, z, ldj):
@@ -259,8 +258,8 @@ d1, d2 = torch.where(orig_img.squeeze() != reconst_img.squeeze())
 if len(d1) != 0:
     print("Dequantization was not invertible.")
     for i in range(d1.shape[0]):
-        print("Original value:", orig_img[0,0,d1[i], d2[i]].item())
-        print("Reconstructed value:", reconst_img[0,0,d1[i], d2[i]].item())
+        print("Original value:", orig_img[0, 0, d1[i], d2[i]].item())
+        print("Reconstructed value:", reconst_img[0, 0, d1[i], d2[i]].item())
 else:
     print("Successfully inverted dequantization")
 
@@ -286,20 +285,20 @@ def visualize_dequantization(quants, prior=None):
 
     # Plot volumes and continuous distribution
     sns.set_style("white")
-    fig = plt.figure(figsize=(6,3))
+    fig = plt.figure(figsize=(6, 3))
     x_ticks = []
     for v in np.unique(out):
-        indices = np.where(out==v)
+        indices = np.where(out == v)
         color = to_rgb(f"C{v}")
-        plt.fill_between(inp[indices], prob[indices], np.zeros(indices[0].shape[0]), color=color+(0.5,), label=str(v))
-        plt.plot([inp[indices[0][0]]]*2,  [0, prob[indices[0][0]]],  color=color)
-        plt.plot([inp[indices[0][-1]]]*2, [0, prob[indices[0][-1]]], color=color)
+        plt.fill_between(inp[indices], prob[indices], np.zeros(indices[0].shape[0]), color=color + (0.5,), label=str(v))
+        plt.plot([inp[indices[0][0]]] * 2, [0, prob[indices[0][0]]], color=color)
+        plt.plot([inp[indices[0][-1]]] * 2, [0, prob[indices[0][-1]]], color=color)
         x_ticks.append(inp[indices[0][0]])
     x_ticks.append(inp.max())
     plt.xticks(x_ticks, [f"{x:.1f}" for x in x_ticks])
-    plt.plot(inp,prob, color=(0.0,0.0,0.0))
+    plt.plot(inp, prob, color=(0.0, 0.0, 0.0))
     # Set final plot properties
-    plt.ylim(0, prob.max()*1.1)
+    plt.ylim(0, prob.max() * 1.1)
     plt.xlim(inp.min(), inp.max())
     plt.xlabel("z")
     plt.ylabel("Probability")
@@ -389,18 +388,18 @@ class CouplingLayer(nn.Module):
             # Whether we first shift and then scale, or the other way round,
             # is a design choice, and usually does not have a big impact
             z = (z + t) * torch.exp(s)
-            ldj += s.sum(dim=[1,2,3])
+            ldj += s.sum(dim=[1, 2, 3])
         else:
             z = (z * torch.exp(-s)) - t
-            ldj -= s.sum(dim=[1,2,3])
+            ldj -= s.sum(dim=[1, 2, 3])
 
         return z, ldj
     
 with torch.no_grad():
-    x = torch.arange(-5,5,0.01)
+    x = torch.arange(-5, 5, 0.01)
     scaling_factors = [0.5, 1, 2]
     sns.set()
-    fig, ax = plt.subplots(1, 3, figsize=(12,3))
+    fig, ax = plt.subplots(1, 3, figsize=(12, 3))
     for i, scale in enumerate(scaling_factors):
         y = torch.tanh(x / scale) * scale
         ax[i].plot(x.numpy(), y.numpy())
@@ -420,18 +419,18 @@ def create_checkerboard_mask(h, w, invert=False):
     return mask
 
 def create_channel_mask(c_in, invert=False):
-    mask = torch.cat([torch.ones(c_in//2, dtype=torch.float32),
-                      torch.zeros(c_in-c_in//2, dtype=torch.float32)])
+    mask = torch.cat([torch.ones(c_in // 2, dtype=torch.float32),
+                      torch.zeros(c_in - c_in // 2, dtype=torch.float32)])
     mask = mask.view(1, c_in, 1, 1)
     if invert:
         mask = 1 - mask
     return mask
 
-checkerboard_mask = create_checkerboard_mask(h=8, w=8).expand(-1,2,-1,-1)
-channel_mask = create_channel_mask(c_in=2).expand(-1,-1,8,8)
+checkerboard_mask = create_checkerboard_mask(h=8, w=8).expand(-1, 2, -1, -1)
+channel_mask = create_channel_mask(c_in=2).expand(-1, -1, 8, 8)
 
-show_imgs(checkerboard_mask.transpose(0,1), "Checkerboard mask")
-show_imgs(channel_mask.transpose(0,1), "Channel mask")
+show_imgs(checkerboard_mask.transpose(0, 1), "Checkerboard mask")
+show_imgs(channel_mask.transpose(0, 1), "Channel mask")
 
 class ConcatELU(nn.Module):
     """
@@ -477,9 +476,9 @@ class GatedConv(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             ConcatELU(),
-            nn.Conv2d(2*c_in, c_hidden, kernel_size=3, padding=1),
+            nn.Conv2d(2 * c_in, c_hidden, kernel_size=3, padding=1),
             ConcatELU(),
-            nn.Conv2d(2*c_hidden, 2*c_in, kernel_size=1)
+            nn.Conv2d(2 * c_hidden, 2 * c_in, kernel_size=1)
         )
 
     def forward(self, x):
@@ -507,7 +506,7 @@ class GatedConvNet(nn.Module):
             layers += [GatedConv(c_hidden, c_hidden),
                        LayerNormChannels(c_hidden)]
         layers += [ConcatELU(),
-                   nn.Conv2d(2*c_hidden, c_out, kernel_size=3, padding=1)]
+                   nn.Conv2d(2 * c_hidden, c_out, kernel_size=3, padding=1)]
         self.nn = nn.Sequential(*layers)
 
         self.nn[-1].weight.data.zero_()
@@ -520,7 +519,7 @@ def create_simple_flow(use_vardeq=True):
     flow_layers = []
     if use_vardeq:
         vardeq_layers = [CouplingLayer(network=GatedConvNet(c_in=2, c_out=2, c_hidden=16),
-                                       mask=create_checkerboard_mask(h=28, w=28, invert=(i%2==1)),
+                                       mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
                                        c_in=1) for i in range(4)]
         flow_layers += [VariationalDequantization(var_flows=vardeq_layers)]
     else:
@@ -528,7 +527,7 @@ def create_simple_flow(use_vardeq=True):
 
     for i in range(8):
         flow_layers += [CouplingLayer(network=GatedConvNet(c_in=1, c_hidden=32),
-                                      mask=create_checkerboard_mask(h=28, w=28, invert=(i%2==1)),
+                                      mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
                                       c_in=1)]
 
     flow_model = ImageFlow(flow_layers).to(device)
@@ -578,21 +577,21 @@ class SqueezeFlow(nn.Module):
         B, C, H, W = z.shape
         if not reverse:
             # Forward direction: H x W x C => H/2 x W/2 x 4C
-            z = z.reshape(B, C, H//2, 2, W//2, 2)
+            z = z.reshape(B, C, H // 2, 2, W // 2, 2)
             z = z.permute(0, 1, 3, 5, 2, 4)
-            z = z.reshape(B, 4*C, H//2, W//2)
+            z = z.reshape(B, 4 * C, H // 2, W // 2)
         else:
             # Reverse direction: H/2 x W/2 x 4C => H x W x C
-            z = z.reshape(B, C//4, 2, 2, H, W)
+            z = z.reshape(B, C // 4, 2, 2, H, W)
             z = z.permute(0, 1, 4, 2, 5, 3)
-            z = z.reshape(B, C//4, H*2, W*2)
+            z = z.reshape(B, C // 4, H * 2, W * 2)
         return z, ldj
 
 sq_flow = SqueezeFlow()
-rand_img = torch.arange(1,17).view(1, 1, 4, 4)
+rand_img = torch.arange(1, 17).view(1, 1, 4, 4)
 print("Image (before)\n", rand_img)
 forward_img, _ = sq_flow(rand_img, ldj=None, reverse=False)
-print("\nImage (forward)\n", forward_img.permute(0,2,3,1)) # Permute for readability
+print("\nImage (forward)\n", forward_img.permute(0, 2, 3, 1)) # Permute for readability
 reconst_img, _ = sq_flow(forward_img, ldj=None, reverse=True)
 print("\nImage (reverse)\n", reconst_img)
 
@@ -605,34 +604,34 @@ class SplitFlow(nn.Module):
     def forward(self, z, ldj, reverse=False):
         if not reverse:
             z, z_split = z.chunk(2, dim=1)
-            ldj += self.prior.log_prob(z_split).sum(dim=[1,2,3])
+            ldj += self.prior.log_prob(z_split).sum(dim=[1, 2, 3])
         else:
             z_split = self.prior.sample(sample_shape=z.shape).to(device)
             z = torch.cat([z, z_split], dim=1)
-            ldj -= self.prior.log_prob(z_split).sum(dim=[1,2,3])
+            ldj -= self.prior.log_prob(z_split).sum(dim=[1, 2, 3])
         return z, ldj
     
 def create_multiscale_flow():
     flow_layers = []
 
     vardeq_layers = [CouplingLayer(network=GatedConvNet(c_in=2, c_out=2, c_hidden=16),
-                                   mask=create_checkerboard_mask(h=28, w=28, invert=(i%2==1)),
+                                   mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
                                    c_in=1) for i in range(4)]
     flow_layers += [VariationalDequantization(vardeq_layers)]
 
     flow_layers += [CouplingLayer(network=GatedConvNet(c_in=1, c_hidden=32),
-                                  mask=create_checkerboard_mask(h=28, w=28, invert=(i%2==1)),
+                                  mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
                                   c_in=1) for i in range(2)]
     flow_layers += [SqueezeFlow()]
     for i in range(2):
         flow_layers += [CouplingLayer(network=GatedConvNet(c_in=4, c_hidden=48),
-                                      mask=create_channel_mask(c_in=4, invert=(i%2==1)),
+                                      mask=create_channel_mask(c_in=4, invert=(i % 2 == 1)),
                                       c_in=4)]
     flow_layers += [SplitFlow(),
                     SqueezeFlow()]
     for i in range(4):
         flow_layers += [CouplingLayer(network=GatedConvNet(c_in=8, c_hidden=64),
-                                      mask=create_channel_mask(c_in=8, invert=(i%2==1)),
+                                      mask=create_channel_mask(c_in=8, invert=(i % 2 == 1)),
                                       c_in=8)]
 
     flow_model = ImageFlow(flow_layers).to(device)
@@ -654,11 +653,11 @@ flow_dict["multiscale"]["model"], flow_dict["multiscale"]["result"] = train_flow
 flow_dict["simple"]["result"]
 
 pl.seed_everything(44)
-samples = flow_dict["vardeq"]["model"].sample(img_shape=[16,1,28,28])
+samples = flow_dict["vardeq"]["model"].sample(img_shape=[16, 1, 28, 28])
 show_imgs(samples.cpu())
 
 pl.seed_everything(42)
-samples = flow_dict["multiscale"]["model"].sample(img_shape=[16,8,7,7])
+samples = flow_dict["multiscale"]["model"].sample(img_shape=[16, 8, 7, 7])
 show_imgs(samples.cpu())
 
 @torch.no_grad()
@@ -680,15 +679,15 @@ exmp_imgs, _ = next(iter(train_loader))
 
 pl.seed_everything(42)
 for i in range(2):
-    interpolate(flow_dict["vardeq"]["model"], exmp_imgs[2*i], exmp_imgs[2*i+1])
+    interpolate(flow_dict["vardeq"]["model"], exmp_imgs[2 * i], exmp_imgs[2 * i + 1])
 
 pl.seed_everything(42)
 for i in range(2):
-    interpolate(flow_dict["multiscale"]["model"], exmp_imgs[2*i], exmp_imgs[2*i+1])
+    interpolate(flow_dict["multiscale"]["model"], exmp_imgs[2 * i], exmp_imgs[2 * i + 1])
 
 pl.seed_everything(44)
 for _ in range(3):
-    z_init = flow_dict["multiscale"]["model"].prior.sample(sample_shape=[1,8,7,7])
+    z_init = flow_dict["multiscale"]["model"].prior.sample(sample_shape=[1, 8, 7, 7])
     z_init = z_init.expand(8, -1, -1, -1)
     samples = flow_dict["multiscale"]["model"].sample(img_shape=z_init.shape, z_init=z_init)
     show_imgs(samples.cpu())
