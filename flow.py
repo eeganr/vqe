@@ -37,11 +37,15 @@ print("Using device", device)
 
 qubits = 3
 
-psi = normalize(bknd.rand((2,)*qubits))
+psi = bknd.zeros((2,)*qubits)
 
-ham = gen_tfim_ham(1, qubits)
+psi[(0,)*qubits] = 1
 
-thetas = bknd.rand((2,)*qubits)
+psi = normalize(psi)
+
+thetas = bknd.rand((1, qubits, 8))
+
+ham = gen_tfim_ham(0, thetas.shape[1])+0j
 
 orig_img = thetas
 
@@ -90,11 +94,17 @@ class ImageFlow(pl.LightningModule):
 
     def _get_likelihood(self, imgs, return_ll=False):
         """
-        New loss function? TODO: Check if reasonable
+        Given a batch of images, return the likelihood of those.
+        If return_ll is True, this function returns the log likelihood of the input.
+        Otherwise, the ouptut metric is bits per dimension (scaled negative log likelihood)
         """
-        energies = [su2_energy_from_thetas(psi, img) for img in imgs]
-
-        return -torch.stack(energies).mean()+min(energies)
+        z, ldj = self.encode(imgs)
+        log_pz = self.prior.log_prob(z).sum(dim=[1, 2, 3])
+        log_px = ldj + log_pz
+        nll = -log_px
+        # Calculating bits per dimension
+        bpd = nll * np.log2(np.exp(1)) / np.prod(imgs.shape[1:])
+        return bpd.mean() if not return_ll else log_px
 
     @torch.no_grad()
     def sample(self, img_shape, z_init=None):
@@ -202,9 +212,9 @@ class CouplingLayer(nn.Module):
         else:
             z = (z * torch.exp(-s)) - t
             ldj -= s.sum(dim=[1, 2, 3])
-
+        #TODO: pay attention to signs
         return z, ldj
-    
+"""
 with torch.no_grad():
     x = torch.arange(-5, 5, 0.01)
     scaling_factors = [0.5, 1, 2]
@@ -218,7 +228,7 @@ with torch.no_grad():
     plt.subplots_adjust(wspace=0.4)
     sns.reset_orig()
     plt.show()
-
+"""
 def create_checkerboard_mask(h, w, invert=False):
     x, y = torch.arange(h, dtype=torch.int32), torch.arange(w, dtype=torch.int32)
     xx, yy = torch.meshgrid(x, y, indexing='ij')
@@ -236,8 +246,10 @@ def create_channel_mask(c_in, invert=False):
         mask = 1 - mask
     return mask
 
-checkerboard_mask = create_checkerboard_mask(h=thetas.shape[0], w=thetas.shape[1]).expand(-1, 2, -1, -1)
+checkerboard_mask = create_checkerboard_mask(h=thetas.shape[1], w=thetas.shape[2]).expand(-1, 2, -1, -1)
+print("Checker Mask:", checkerboard_mask.shape)
 channel_mask = create_channel_mask(c_in=2).expand(-1, -1, 8, 8)
+print("Channel Mask:", channel_mask.shape)
 
 class ConcatELU(nn.Module):
     """
@@ -326,7 +338,7 @@ def create_simple_flow():
 
     for i in range(8):
         flow_layers += [CouplingLayer(network=GatedConvNet(c_in=1, c_hidden=32),
-                                      mask=create_checkerboard_mask(h=thetas.shape[0], w=thetas.shape[1], invert=(i % 2 == 1)),
+                                      mask=create_checkerboard_mask(h=thetas.shape[1], w=thetas.shape[2], invert=(i % 2 == 1)),
                                       c_in=1)]
 
     flow_model = ImageFlow(flow_layers).to(device)
@@ -334,6 +346,7 @@ def create_simple_flow():
 
 def train_flow(flow, model_name="MNISTFlow"):
     # Create a PyTorch Lightning trainer
+    """
     trainer = pl.Trainer(default_root_dir=os.path.join(CHECKPOINT_PATH, model_name),
                          accelerator="gpu" if str(device).startswith("cuda") else "cpu",
                          devices=1,
@@ -344,7 +357,7 @@ def train_flow(flow, model_name="MNISTFlow"):
                          check_val_every_n_epoch=5)
     trainer.logger._log_graph = True
     trainer.logger._default_hp_metric = None # Optional logging argument that we don't need
-
+    
     result = None
 
     # Check whether pretrained model exists. If yes, load it and skip training
@@ -362,8 +375,33 @@ def train_flow(flow, model_name="MNISTFlow"):
     if result is None:
         start_time = time.time()
         duration = time.time() - start_time
+    """
 
-    return flow, result
+    # Train the model
+    optimizer = optim.Adam(flow.parameters(), lr=1e-3)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.99)
+
+    # su2_energy_from_thetas_vmapped = torch.vmap(su2_energy_from_thetas, in_dims=(None, None, 0), out_dims=0)
+
+    for iteration in range(200):
+        optimizer.zero_grad()
+        samples = flow.sample((100,) + thetas.shape)
+        log_p = flow._get_likelihood(samples, True)
+
+        samples = [2 * torch.pi * torch.abs(torch.sigmoid(sample)) for sample in samples]
+
+        energies = torch.stack([su2_energy_from_thetas(psi, ham, sample.squeeze(0)) for sample in samples])
+        loss = (energies - energies.mean()) * log_p 
+
+        loss = loss.mean().real
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+        
+        print(energies.mean())
+
+
+    return flow
 
 class SqueezeFlow(nn.Module):
 
@@ -380,14 +418,6 @@ class SqueezeFlow(nn.Module):
             z = z.permute(0, 1, 4, 2, 5, 3)
             z = z.reshape(B, C // 4, H * 2, W * 2)
         return z, ldj
-
-sq_flow = SqueezeFlow()
-rand_img = torch.arange(1, 17).view(1, 1, 4, 4)
-print("Image (before)\n", rand_img)
-forward_img, _ = sq_flow(rand_img, ldj=None, reverse=False)
-print("\nImage (forward)\n", forward_img.permute(0, 2, 3, 1)) # Permute for readability
-reconst_img, _ = sq_flow(forward_img, ldj=None, reverse=True)
-print("\nImage (reverse)\n", reconst_img)
 
 class SplitFlow(nn.Module):
 
@@ -407,10 +437,6 @@ class SplitFlow(nn.Module):
     
 def create_multiscale_flow():
     flow_layers = []
-
-    vardeq_layers = [CouplingLayer(network=GatedConvNet(c_in=2, c_out=2, c_hidden=16),
-                                   mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
-                                   c_in=1) for i in range(4)]
 
     flow_layers += [CouplingLayer(network=GatedConvNet(c_in=1, c_hidden=32),
                                   mask=create_checkerboard_mask(h=28, w=28, invert=(i % 2 == 1)),
@@ -434,42 +460,4 @@ def print_num_params(model):
     num_params = sum([np.prod(p.shape) for p in model.parameters()])
     print("Number of parameters: {:,}".format(num_params))
 
-print_num_params(create_simple_flow(use_vardeq=False))
-print_num_params(create_simple_flow(use_vardeq=True))
-print_num_params(create_multiscale_flow())
-
-flow_dict = {"simple": {}, "vardeq": {}, "multiscale": {}}
-flow_dict["simple"]["model"], flow_dict["simple"]["result"] = train_flow(create_simple_flow(use_vardeq=False), model_name="MNISTFlow_simple")
-flow_dict["vardeq"]["model"], flow_dict["vardeq"]["result"] = train_flow(create_simple_flow(use_vardeq=True), model_name="MNISTFlow_vardeq")
-flow_dict["multiscale"]["model"], flow_dict["multiscale"]["result"] = train_flow(create_multiscale_flow(), model_name="MNISTFlow_multiscale")
-
-flow_dict["simple"]["result"]
-
-pl.seed_everything(44)
-samples = flow_dict["vardeq"]["model"].sample(img_shape=[16, 1, 28, 28])
-
-pl.seed_everything(42)
-samples = flow_dict["multiscale"]["model"].sample(img_shape=[16, 8, 7, 7])
-
-@torch.no_grad()
-def interpolate(model, img1, img2, num_steps=8):
-    """
-    Inputs:
-        model - object of ImageFlow class that represents the (trained) flow model
-        img1, img2 - Image tensors of shape [1, 28, 28]. Images between which should be interpolated.
-        num_steps - Number of interpolation steps. 8 interpolation steps mean 6 intermediate pictures besides img1 and img2
-    """
-    imgs = torch.stack([img1, img2], dim=0).to(model.device)
-    z, _ = model.encode(imgs)
-    alpha = torch.linspace(0, 1, steps=num_steps, device=z.device).view(-1, 1, 1, 1)
-    interpolations = z[0:1] * alpha + z[1:2] * (1 - alpha)
-    interp_imgs = model.sample(interpolations.shape[:1] + imgs.shape[1:], z_init=interpolations)
-
-
-pl.seed_everything(44)
-for _ in range(3):
-    z_init = flow_dict["multiscale"]["model"].prior.sample(sample_shape=[1, 8, 7, 7])
-    z_init = z_init.expand(8, -1, -1, -1)
-    samples = flow_dict["multiscale"]["model"].sample(img_shape=z_init.shape, z_init=z_init)
-    print(thetas)
-
+train_flow(create_simple_flow(), model_name="SimpleFlow")

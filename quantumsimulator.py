@@ -37,6 +37,7 @@ sigma_minus = bknd_tensor([[0., 0.],
                             [1., 0.]])
 sigmam = sigma_m = sigma_minus
 
+
 Sx = S_x = sigma_x / 2
 Sy = S_y = sigma_y / 2
 Sz = S_z = sigma_z / 2
@@ -62,9 +63,6 @@ def apply_many_body_gate(psi_in, gate, nb_qbits, sites):
         if site < 0:
             site = nb_qbits + site
         psi_out = psi_out.reshape(*psi_out.shape, 1).swapaxes(site, -1)
-    print(psi_out, gate, (list(range(-num_sites, 0)), 
-                                            list(range(-num_sites, 0))))
-    print('############')
     psi_out = bknd.tensordot(psi_out, gate, (list(range(-num_sites, 0)), 
                                             list(range(-num_sites, 0))))
     # move the contracted dimensions back
@@ -268,14 +266,13 @@ def su2_transform_psi(psi0, thetas):
                 psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
                 if col < gates - 1 and row == qubits - 1:
                     for row_CX in reversed(range(qubits - 1)):
-                        psi_out = apply_many_body_gate(psi_out, CX.to(bknd.complex64), qubits, [row_CX, row_CX+1])
+                        psi_out = apply_many_body_gate(psi_out, CX.to(bknd.complex64).reshape((2,2,2,2)), qubits, [row_CX, row_CX+1])
                         # TODO: Problem here? Changes shape of psi?
     
     return psi_out
     
-def su2_energy_from_thetas(psi0, thetas):
+def su2_energy_from_thetas(psi0, ham, thetas):
     psi_out = su2_transform_psi(psi0, thetas)
-    ham = gen_tfim_ham(0, thetas.shape[0])
     return expect_value(ham, psi_out, True)
 # Neural network will create a bunch of gates
 # Different probability for each gate

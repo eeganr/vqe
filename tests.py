@@ -78,7 +78,9 @@ class TestSimulator(unittest.TestCase):
 
         thetas = bknd.rand((qubits, 8))
 
-        print(su2_energy_from_thetas(psi, thetas))
+        ham = gen_tfim_ham(0, thetas.shape[0])+0j
+
+        print(su2_energy_from_thetas(psi, ham, thetas))
 
 
 if __name__ == '__main__':

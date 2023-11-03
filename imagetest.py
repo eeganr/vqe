@@ -535,6 +535,7 @@ def create_simple_flow(use_vardeq=True):
 
 def train_flow(flow, model_name="MNISTFlow"):
     # Create a PyTorch Lightning trainer
+    
     trainer = pl.Trainer(default_root_dir=os.path.join(CHECKPOINT_PATH, model_name),
                          accelerator="gpu" if str(device).startswith("cuda") else "cpu",
                          devices=1,
