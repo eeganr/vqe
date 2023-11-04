@@ -85,14 +85,14 @@ class ImageFlow(pl.LightningModule):
     def forward(self, imgs):
         # The forward function is only used for visualizing the graph
         return self._get_likelihood(imgs)
-
+    
     def encode(self, imgs):
         # Given a batch of images, return the latent representation z and ldj of the transformations
         z, ldj = imgs, torch.zeros(imgs.shape[0], device=self.device)
         for flow in self.flows:
             z, ldj = flow(z, ldj, reverse=False)
         return z, ldj
-
+    
     def _get_likelihood(self, imgs, return_ll=False):
         """
         Given a batch of images, return the likelihood of those.
@@ -446,19 +446,17 @@ def train_flow(flow, model_name="MNISTFlow"):
         samples = flow.sample((100,) + thetas.shape)
         log_p = flow._get_likelihood(samples, True)
 
-        print(samples.max(), samples.min())
-
+        samples = 2 * torch.pi * torch.abs(torch.sigmoid(samples))
+        
         energies = torch.stack([su2_energy_from_thetas(psi, ham, sample.squeeze(0)) for sample in samples])
         loss = (energies - energies.mean()) * log_p 
 
         loss = loss.mean().real
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(flow.parameters(), 0.5)
         optimizer.step()
         scheduler.step()
         
         print(energies.mean())
-
 
     return flow
 
