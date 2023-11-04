@@ -20,6 +20,7 @@ from tqdm.notebook import tqdm
 
 # PyTorch
 import torch
+torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as data
@@ -213,6 +214,61 @@ class CouplingLayer(nn.Module):
             z = (z * torch.exp(-s)) - t
             ldj -= s.sum(dim=[1, 2, 3])
         #TODO: pay attention to signs
+
+        assert not torch.isnan(z).any()
+        return z, ldj
+
+def update_z(z, reverse):
+    if reverse:
+        z = 2 * torch.pi * torch.clip(torch.sigmoid(z), 1e-8, 1 - 1e-8)
+    else:
+        z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-8, 1 - 1e-8))
+    return z
+
+def log_grad_z(z, reverse):
+    if reverse:
+        return torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z)
+    else: 
+        z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-8, 1 - 1e-8))
+        return -torch.log(torch.tensor(2 * torch.pi)) + torch.nn.functional.softplus(-z) + torch.nn.functional.softplus(z)
+
+def finite_difference(f, z, eps=1e-4):
+    return torch.log((f(z + eps) - f(z - eps))) - torch.log(torch.tensor(2 * eps))
+
+class AngleCorrectionLayer(nn.Module):
+
+    def __init__(self):
+        """
+        Fixes domain of angle of flow model.
+        """
+        super().__init__()
+
+    def forward(self, z, ldj, reverse=False):
+        """
+        Inputs:
+            z - Latent input to the flow
+            ldj - The current ldj of the previous flows.
+                  The ldj of this layer will be added to this tensor.
+            reverse - If True, we apply the inverse of the layer.
+            orig_img (optional) - Only needed in VarDeq. Allows external
+                                  input to condition the flow on (e.g. original image)
+        """
+
+        assert not torch.isnan(ldj).any()
+
+
+        # Affine transformation
+        if reverse:
+            ldj += torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1,2,3])
+            z = 2 * torch.pi * torch.clip(torch.sigmoid(z), 1e-8, 1 - 1e-8)
+        else: 
+            z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-8, 1 - 1e-8))
+            ldj -= torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1,2,3])
+        #TODO: pay attention to signs
+
+        assert not torch.isnan(ldj).any()
+
+
         return z, ldj
 """
 with torch.no_grad():
@@ -325,6 +381,7 @@ class GatedConvNet(nn.Module):
                        LayerNormChannels(c_hidden)]
         layers += [ConcatELU(),
                    nn.Conv2d(2 * c_hidden, c_out, kernel_size=3, padding=1)]
+
         self.nn = nn.Sequential(*layers)
 
         self.nn[-1].weight.data.zero_()
@@ -334,7 +391,8 @@ class GatedConvNet(nn.Module):
         return self.nn(x)
     
 def create_simple_flow():
-    flow_layers = []
+    flow_layers = [AngleCorrectionLayer()]
+    
 
     for i in range(8):
         flow_layers += [CouplingLayer(network=GatedConvNet(c_in=1, c_hidden=32),
@@ -388,13 +446,14 @@ def train_flow(flow, model_name="MNISTFlow"):
         samples = flow.sample((100,) + thetas.shape)
         log_p = flow._get_likelihood(samples, True)
 
-        samples = [2 * torch.pi * torch.abs(torch.sigmoid(sample)) for sample in samples]
+        print(samples.max(), samples.min())
 
         energies = torch.stack([su2_energy_from_thetas(psi, ham, sample.squeeze(0)) for sample in samples])
         loss = (energies - energies.mean()) * log_p 
 
         loss = loss.mean().real
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(flow.parameters(), 0.5)
         optimizer.step()
         scheduler.step()
         

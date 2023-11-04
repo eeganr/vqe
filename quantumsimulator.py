@@ -271,6 +271,8 @@ def su2_transform_psi(psi0, thetas):
     
     return psi_out
     
+
+
 def su2_energy_from_thetas(psi0, ham, thetas):
     psi_out = su2_transform_psi(psi0, thetas)
     return expect_value(ham, psi_out, True)
