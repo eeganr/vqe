@@ -220,9 +220,9 @@ class CouplingLayer(nn.Module):
 
 def update_z(z, reverse):
     if reverse:
-        z = 2 * torch.pi * torch.clip(torch.sigmoid(z), 1e-8, 1 - 1e-8)
+        z = 2 * torch.pi * torch.clip(torch.sigmoid(z), 1e-5, 1 - 1e-5)
     else:
-        z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-8, 1 - 1e-8))
+        z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-5, 1 - 1e-5))
     return z
 
 def log_grad_z(z, reverse):
@@ -232,7 +232,7 @@ def log_grad_z(z, reverse):
         z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-8, 1 - 1e-8))
         return -torch.log(torch.tensor(2 * torch.pi)) + torch.nn.functional.softplus(-z) + torch.nn.functional.softplus(z)
 
-def finite_difference(f, z, eps=1e-4):
+def finite_difference(f, z, eps=1e-5):
     return torch.log((f(z + eps) - f(z - eps))) - torch.log(torch.tensor(2 * eps))
 
 class AngleCorrectionLayer(nn.Module):
@@ -260,9 +260,9 @@ class AngleCorrectionLayer(nn.Module):
         # Affine transformation
         if reverse:
             ldj += torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1,2,3])
-            z = 2 * torch.pi * torch.clip(torch.sigmoid(z), 1e-8, 1 - 1e-8)
+            z = 2 * torch.pi * torch.clip(torch.sigmoid(z), 1e-5, 1 - 1e-5)
         else: 
-            z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-8, 1 - 1e-8))
+            z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-5, 1 - 1e-5))
             ldj -= torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1,2,3])
         #TODO: pay attention to signs
 
