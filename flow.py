@@ -46,7 +46,7 @@ psi = normalize(psi)
 
 thetas = bknd.rand((1, qubits, 8))
 
-ham = gen_tfim_ham(0, thetas.shape[1])+0j
+ham = gen_tfim_ham(0.5, thetas.shape[1])+0j
 
 orig_img = thetas
 
@@ -446,9 +446,9 @@ def train_flow(flow, model_name="MNISTFlow"):
         samples = flow.sample((100,) + thetas.shape)
         log_p = flow._get_likelihood(samples, True)
 
-        samples = 2 * torch.pi * torch.abs(torch.sigmoid(samples))
+        # samples = 2 * torch.pi * torch.abs(torch.sigmoid(samples))
         
-        energies = torch.stack([su2_energy_from_thetas(psi, ham, sample.squeeze(0)) for sample in samples])
+        energies = torch.stack([su2_energy_from_thetas(psi, ham, sample.squeeze(0)) for sample in samples]).real
         loss = (energies - energies.mean()) * log_p 
 
         loss = loss.mean().real
@@ -456,6 +456,8 @@ def train_flow(flow, model_name="MNISTFlow"):
         optimizer.step()
         scheduler.step()
         
+        print(samples[torch.argmin(energies.real)], torch.min(energies.real))
+
         print(energies.mean())
 
     return flow

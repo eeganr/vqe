@@ -47,6 +47,12 @@ CX = bknd_tensor([[1., 0., 0., 0.], # TODO: Check is this is correct
                   [0., 0., 0., 1.], 
                   [0., 0., 1., 0.]])
 
+CY = bknd_tensor([[1., 0., 0., 0.], # TODO: Check is this is correct
+                  [0., 0., 0., -1j], 
+                  [0., 0., 1., 0.], 
+                  [0., 1j, 0., 0.]])
+
+
 def apply_many_body_gate(psi_in, gate, nb_qbits, sites):
     """
     psi_in: ibkndut wave function of shape (d,d,d,d,d...)
@@ -276,6 +282,11 @@ def su2_transform_psi(psi0, thetas):
 def su2_energy_from_thetas(psi0, ham, thetas):
     psi_out = su2_transform_psi(psi0, thetas)
     return expect_value(ham, psi_out, True)
+
+def su2_energy_from_thetas_batched(psi0, ham, thetas):
+    psi_out = su2_transform_psi(psi0, thetas)
+    return expect_value(ham, psi_out, True)
+
 # Neural network will create a bunch of gates
 # Different probability for each gate
 # Use some search algorithm for gate creation?
