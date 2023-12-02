@@ -44,7 +44,7 @@ psi[(0,)*qubits] = 1
 
 psi = normalize(psi)
 
-thetas = bknd.rand((1, qubits, 8))
+thetas = bknd.rand((1, qubits, 4))
 
 ham = gen_tfim_ham(0.5, thetas.shape[1])+0j
 
@@ -213,7 +213,7 @@ class CouplingLayer(nn.Module):
         else:
             z = (z * torch.exp(-s)) - t
             ldj -= s.sum(dim=[1, 2, 3])
-        #TODO: pay attention to signs
+        # TODO: pay attention to signs
 
         assert not torch.isnan(z).any()
         return z, ldj
@@ -259,12 +259,12 @@ class AngleCorrectionLayer(nn.Module):
 
         # Affine transformation
         if reverse:
-            ldj += torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1,2,3])
+            ldj += torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1, 2, 3])
             z = 2 * torch.pi * torch.clip(torch.sigmoid(z), 1e-5, 1 - 1e-5)
         else: 
             z = torch.logit(torch.clip(z / (2 * torch.pi), 1e-5, 1 - 1e-5))
-            ldj -= torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1,2,3])
-        #TODO: pay attention to signs
+            ldj -= torch.sum(torch.log(torch.tensor(2 * torch.pi)) - torch.nn.functional.softplus(-z) - torch.nn.functional.softplus(z), dim=[1, 2, 3])
+        # TODO: pay attention to signs
 
         assert not torch.isnan(ldj).any()
 
@@ -448,7 +448,7 @@ def train_flow(flow, model_name="MNISTFlow"):
 
         # samples = 2 * torch.pi * torch.abs(torch.sigmoid(samples))
         
-        energies = torch.stack([su2_energy_from_thetas(psi, ham, sample.squeeze(0)) for sample in samples]).real
+        energies = su2_energy_from_thetas_batched(psi, ham, samples.squeeze(1)).real
         loss = (energies - energies.mean()) * log_p 
 
         loss = loss.mean().real

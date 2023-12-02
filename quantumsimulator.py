@@ -272,8 +272,7 @@ def su2_transform_psi(psi0, thetas):
                 psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
                 if col < gates - 1 and row == qubits - 1:
                     for row_CX in reversed(range(qubits - 1)):
-                        psi_out = apply_many_body_gate(psi_out, CX.to(bknd.complex64).reshape((2,2,2,2)), qubits, [row_CX, row_CX+1])
-                        # TODO: Problem here? Changes shape of psi?
+                        psi_out = apply_many_body_gate(psi_out, CX.to(bknd.complex64).reshape((2, 2, 2, 2)), qubits, [row_CX, row_CX+1])
     
     return psi_out
     
@@ -283,9 +282,36 @@ def su2_energy_from_thetas(psi0, ham, thetas):
     psi_out = su2_transform_psi(psi0, thetas)
     return expect_value(ham, psi_out, True)
 
-def su2_energy_from_thetas_batched(psi0, ham, thetas):
-    psi_out = su2_transform_psi(psi0, thetas)
-    return expect_value(ham, psi_out, True)
+def su2_energy_from_thetas_batched(psi0, ham, theta_batch):
+
+    qubits = theta_batch.shape[1]
+    gates = theta_batch.shape[2]
+
+    print(theta_batch.shape, psi0.shape)
+
+    psi_out = psi0.detach().clone().to(bknd.complex64)
+
+    # Check if psi0 fits number of qubits
+    assert qubits == len(psi0.shape)
+    assert gates % 2 == 0
+
+    for col in range(gates):
+        for row in range(qubits):
+            if col % 2 == 0:
+                batched_apply_Ry_gate = torch.func.vmap(lambda psi, thetas: apply_many_body_gate(psi, Ry_gate(thetas[row][col]).to(bknd.complex64), qubits, [row]))
+                psi_out = batched_apply_Ry_gate(psi_out, theta_batch)
+
+            else: 
+                batched_apply_Rz_gate = torch.func.vmap(lambda psi, thetas: apply_many_body_gate(psi, Rz_gate(thetas[row][col]).to(bknd.complex64), qubits, [row]))
+                psi_out = batched_apply_Rz_gate(psi_out, theta_batch)
+
+                if col < gates - 1 and row == qubits - 1:
+                    for row_CX in reversed(range(qubits - 1)):
+                        batched_apply_CX_gate = torch.func.vmap(lambda psi: apply_many_body_gate(psi, CX.to(bknd.complex64), qubits, [row_CX, row_CX+1]))
+                        psi_out = batched_apply_CX_gate(psi_out)
+
+    batched_expect_value = torch.func.vmap(lambda psi: expect_value(ham, psi, True))
+    return batched_expect_value(psi_out)
 
 # Neural network will create a bunch of gates
 # Different probability for each gate
