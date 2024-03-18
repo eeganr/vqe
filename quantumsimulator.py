@@ -8,10 +8,12 @@ if backend == 'torch':
     import torch as bknd
     bknd_tensor = bknd.tensor
     bknd_array = bknd_tensor
+    """
 elif backend == 'numpy':
     import numpy as bknd
     bknd_array = bknd.array
     bknd_tensor = bknd_array
+    """
 
 sigma_eye = bknd_tensor([[1., 0.],
                           [0., 1.]])
@@ -48,9 +50,9 @@ CX = bknd_tensor([[1., 0., 0., 0.], # TODO: Check is this is correct
                   [0., 0., 1., 0.]])
 
 CY = bknd_tensor([[1., 0., 0., 0.], # TODO: Check is this is correct
-                  [0., 0., 0., -1j], 
-                  [0., 0., 1., 0.], 
-                  [0., 1j, 0., 0.]])
+                  [0., 0., 0., 0.], 
+                  [0., 0., 0., -1.j], 
+                  [0., 0., 1.j, 0.]])
 
 
 def apply_many_body_gate(psi_in, gate, nb_qbits, sites):
@@ -241,49 +243,56 @@ def expect_value(operator, psi, normalize=False):
     return ev
 
 def Rx_gate(theta):
-    return bknd_tensor([[bknd.cos(theta/2), -1j*bknd.sin(theta/2)], [-1j*bknd.sin(theta/2), bknd.cos(theta/2)]])
+    return bknd.stack([bknd.stack([bknd.cos(theta/2), -1j*bknd.sin(theta/2)]), bknd.stack([-1j*bknd.sin(theta/2), bknd.cos(theta/2)])])
 
 
 def Ry_gate(theta):
-    return bknd_tensor([[bknd.cos(theta/2), -bknd.sin(theta/2)], [bknd.sin(theta/2), bknd.cos(theta/2)]])
+    return bknd.stack([bknd.stack([bknd.cos(theta/2), -bknd.sin(theta/2)]), bknd.stack([bknd.sin(theta/2), bknd.cos(theta/2)])])
 
 
 def Rz_gate(theta):
-    return bknd_tensor([[bknd.exp(-1j*theta/2), 0], [0, bknd.exp(1j*theta/2)]])
-
-
-def su2_transform_psi(psi0, thetas):
-    qubits = thetas.shape[0]
-    gates = thetas.shape[1]
-
-    psi_out = psi0.detach().clone().to(bknd.complex64)
-
-    # Check if psi0 fits number of qubits
-    assert qubits == len(psi0.shape)
-    assert gates % 2 == 0
-
-    for col in range(gates):
-        for row in range(qubits):
-            if col % 2 == 0:
-                gate = Ry_gate(thetas[row][col])
-                psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
-            else: 
-                gate = Rz_gate(thetas[row][col])
-                psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
-                if col < gates - 1 and row == qubits - 1:
-                    for row_CX in reversed(range(qubits - 1)):
-                        psi_out = apply_many_body_gate(psi_out, CX.to(bknd.complex64).reshape((2, 2, 2, 2)), qubits, [row_CX, row_CX+1])
-    
-    return psi_out
+    return bknd.stack([bknd.stack([bknd.exp(-1j*theta/2), torch.zeros_like(theta)]), bknd.stack([torch.zeros_like(theta), bknd.exp(1j*theta/2)])])
     
 
 
-def su2_energy_from_thetas(psi0, ham, thetas):
-    psi_out = su2_transform_psi(psi0, thetas)
-    return expect_value(ham, psi_out, True)
+# def su2_energy_from_thetas(psi0, ham, thetas):
+    # psi_out = su2_transform_psi(psi0, thetas)
+    # return expect_value(ham, psi_out, True)
 
 def su2_energy_from_thetas_batched(psi0, ham, theta_batch):
+    def su2_transform_psi(thetas):
+        qubits = thetas.shape[0]
+        gates = thetas.shape[1]
 
+        psi_out = psi0.detach().clone().to(bknd.complex64)
+
+        # Check if psi0 fits number of qubits
+        assert qubits == len(psi0.shape)
+        assert gates % 2 == 0
+
+        for col in range(gates):
+            for row in range(qubits):
+                if col % 2 == 0:
+                    gate = Ry_gate(thetas[row][col])
+                    psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
+                else: 
+                    gate = Rz_gate(thetas[row][col])
+                    psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
+                    if col < gates - 1 and row == qubits - 1:
+                        for row_CX in reversed(range(qubits - 1)):
+                            psi_out = apply_many_body_gate(psi_out, CX.to(bknd.complex64).reshape((2, 2, 2, 2)), qubits, [row_CX, row_CX+1])
+        
+        return torch.Tensor(psi_out)
+    
+    energies = []
+    batch_transform = torch.func.vmap(su2_transform_psi)
+    psi_outs = batch_transform(theta_batch)
+    for i in psi_outs:
+        energy = expect_value(ham, i, True)
+        energies.append(energy)
+    return torch.stack(energies)
+
+    """
     qubits = theta_batch.shape[1]
     gates = theta_batch.shape[2]
 
@@ -312,6 +321,8 @@ def su2_energy_from_thetas_batched(psi0, ham, theta_batch):
 
     batched_expect_value = torch.func.vmap(lambda psi: expect_value(ham, psi, True))
     return batched_expect_value(psi_out)
+    """
+
 
 # Neural network will create a bunch of gates
 # Different probability for each gate
