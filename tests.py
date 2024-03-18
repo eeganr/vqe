@@ -80,8 +80,6 @@ class TestSimulator(unittest.TestCase):
 
         ham = gen_tfim_ham(0, thetas.shape[0])+0j
 
-        print(su2_energy_from_thetas(psi, ham, thetas))
-
 
 if __name__ == '__main__':
     unittest.main()
