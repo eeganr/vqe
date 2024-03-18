@@ -50,9 +50,9 @@ CX = bknd_tensor([[1., 0., 0., 0.], # TODO: Check is this is correct
                   [0., 0., 1., 0.]])
 
 CY = bknd_tensor([[1., 0., 0., 0.], # TODO: Check is this is correct
-                  [0., 0., 0., -1j], 
-                  [0., 0., 1., 0.], 
-                  [0., 1j, 0., 0.]])
+                  [0., 0., 0., 0.], 
+                  [0., 0., 0., -1.j], 
+                  [0., 0., 1.j, 0.]])
 
 
 def apply_many_body_gate(psi_in, gate, nb_qbits, sites):
@@ -243,15 +243,15 @@ def expect_value(operator, psi, normalize=False):
     return ev
 
 def Rx_gate(theta):
-    return bknd_tensor([[bknd.cos(theta/2), -1j*bknd.sin(theta/2)], [-1j*bknd.sin(theta/2), bknd.cos(theta/2)]])
+    return bknd.stack([bknd.stack([bknd.cos(theta/2), -1j*bknd.sin(theta/2)]), bknd.stack([-1j*bknd.sin(theta/2), bknd.cos(theta/2)])])
 
 
 def Ry_gate(theta):
-    return bknd_tensor([[bknd.cos(theta/2), -bknd.sin(theta/2)], [bknd.sin(theta/2), bknd.cos(theta/2)]])
+    return bknd.stack([bknd.stack([bknd.cos(theta/2), -bknd.sin(theta/2)]), bknd.stack([bknd.sin(theta/2), bknd.cos(theta/2)])])
 
 
 def Rz_gate(theta):
-    return bknd_tensor([[bknd.exp(-1j*theta/2), 0], [0, bknd.exp(1j*theta/2)]])
+    return bknd.stack([bknd.stack([bknd.exp(-1j*theta/2), torch.zeros_like(theta)]), bknd.stack([torch.zeros_like(theta), bknd.exp(1j*theta/2)])])
     
 
 
@@ -273,7 +273,6 @@ def su2_energy_from_thetas_batched(psi0, ham, theta_batch):
         for col in range(gates):
             for row in range(qubits):
                 if col % 2 == 0:
-                    print(type(thetas[row][col]))
                     gate = Ry_gate(thetas[row][col])
                     psi_out = apply_many_body_gate(psi_out, gate.to(bknd.complex64), qubits, [row])
                 else: 
