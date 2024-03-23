@@ -13,7 +13,7 @@ x = torch.stack(torch.meshgrid(x1, x2, indexing='xy'), dim=-1)
 
 energy = log_energy(x).exp()
 
-flow = zuko.flows.NSF(features=2, transforms=3, hidden_features=(64, 64))
+flow = zuko.flows.NCSF(features=2, transforms=3, hidden_features=(64, 64))
 flow = zuko.flows.Flow(flow.transform.inv, flow.base)
 
 optimizer = torch.optim.Adam(flow.parameters(), lr=1e-3)
@@ -23,8 +23,6 @@ for epoch in range(8):
 
     for _ in range(256):
         x, log_prob = flow().rsample_and_log_prob((256,))  # faster than rsample + log_prob
-
-        print(log_energy(x))
         loss = log_prob.mean() - log_energy(x).mean()
         loss.backward()
 
@@ -36,3 +34,9 @@ for epoch in range(8):
     losses = torch.stack(losses)
 
     print(f'({epoch})', losses.mean().item(), '±', losses.std().item())
+
+samples = flow().sample((16384,))
+
+plt.figure(figsize=(4.8, 4.8))
+plt.hist2d(*samples.T, bins=64, range=((-3, 3), (-3, 3)))
+plt.show()

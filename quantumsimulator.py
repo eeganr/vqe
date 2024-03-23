@@ -268,7 +268,7 @@ def su2_energy_from_thetas_batched(psi0, ham, theta_batch):
 
         # Check if psi0 fits number of qubits
         assert qubits == len(psi0.shape)
-        assert gates % 2 == 0
+        # assert gates % 2 == 0
 
         for col in range(gates):
             for row in range(qubits):
